@@ -1,0 +1,480 @@
+---
+title: "Visbanking News Project"
+author: "Tolga Kurt"
+date: "11/24/2021"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Libraries
+```{r,warning=FALSE,message=FALSE}
+library(RCurl)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(stringr)
+library(stringi)
+library(tm)
+library(gridExtra)
+library(RColorBrewer)
+library(tidytext)
+library(quanteda)
+library(wordcloud)
+library(wordcloud2)
+library(SnowballC)
+library(hunspell)
+library(ggCyberPunk)
+library(ggimage)
+library(ggrepel)
+library(textplot)
+library(RWeka)
+library(devtools)
+library(qdapRegex)
+```
+# Import and Load Dataset
+```{r,warning=FALSE,message=FALSE}
+url = "https://drive.google.com/uc?id=1VesQ5k2EERcZo7HkKN3ItgfghgtxsTUS&export=download"
+load(url(url))
+news_table = news_table%>%as.data.frame()
+```
+## Select important variable and fix time variable
+For use in analysis; title,author,categories,summary_content,origin_title,time,fullcontent,keywords,commontopics,entities, and summary_sentences variables will be imported.
+```{r,warning=FALSE,message=FALSE}
+news = news_table%>%select(title,author,categories,summary_content,origin_title,time,fullcontent,keywords,commontopics,entities,summary_sentences)
+class(news$time) = c("POSIXt","POSIXct")
+news$time = news$time%>%lubridate::as_date()
+news$time%>%head()
+```
+## Basic Line graph Date by Number of News
+Looking at the number of news published by day, the most was published on September 21st, the least was published on September 23.
+```{r,warning=FALSE,message=FALSE}
+news%>%group_by(time)%>%summarise(n = n())%>%ggplot(aes(x = time,y = n))+geom_line(colour = "skyblue")+xlab("Date")+ylab("Number of News")+theme_minimal()+geom_point()
+```
+
+
+
+Let's take out the category variable and clear it.
+Category variable has been extracted and added to the data, but it will not be used because it consists of a single factor.
+
+
+
+```{r,warning=FALSE,message=FALSE}
+split_cat = news$categories%>%str_split(pattern = " ")
+splitcat_add = NULL
+for(i in 1:dim(news)[1])
+{
+  splitcat_add[i] = split_cat[[i]][6]
+  if(i == dim(news)[1])
+  {cat("....Complete....")}
+}
+splitcat_add = splitcat_add%>%as.data.frame()
+remove_pattern = function(str)
+{
+  remove ="~!@#$%^&*(){}_+:\"<>?,./;'[]-="
+  str = str_remove_all(str,"[[:punct:]]")
+}
+splitcat_add = splitcat_add%>%lapply(remove_pattern)%>%as.data.frame()
+news$categories = splitcat_add
+head(news$categories)
+```
+*Now let's clear and analyze the variables title, summary_sentences and fullcontent.*
+
+
+# Title Variable Visualization
+
+
+When the title variable to examine, detect duplicate observations. Lets see duplicate observations.For example 41 and 46th observations are duplicate.
+5 duplicate variables were determined in the title variable and the duplicate ones were excluded from the data.
+```{r,warning=FALSE,message=FALSE}
+news$title[c(41,46)]
+duplicate = which(duplicated(news$title))
+cat("Number of Detect Duplicate Obs.->>>>>",length(duplicate))
+news = news[-duplicate,]
+news$title = rm_url(news$title, pattern=pastex("@rm_url"))
+news$title = gsub("<.*?>", "", news$title)
+cp = VCorpus(VectorSource(news$title))
+docs = cp %>%
+  tm_map(removeNumbers) %>%
+  tm_map(stripWhitespace)%>%
+  tm_map(removePunctuation)
+docs = tm_map(docs, content_transformer(tolower))
+docs = tm_map(docs, removeWords, stopwords("english"))
+
+dtm = TermDocumentMatrix(docs) 
+matrix = as.matrix(dtm) 
+words = sort(rowSums(matrix),decreasing=TRUE) 
+df = data.frame(word = names(words),freq=words)
+#View(df)
+wordcloud2(data=df, size=1, color='random-dark')
+```
+
+```{r,warning=FALSE,message=FALSE}
+textplot_bar(df[1:20,], panel = "Word", col.panel = "skyblue", 
+             xlab = "Count", cextext = 0.5, addpct = TRUE, cexpct = 0.5)
+
+```
+
+```{r,warning=FALSE,message=FALSE}
+ggplot(df[order(-df$freq)[1:30],],aes(y = reorder(freq,word),x = freq))+geom_segment(aes(y =reorder(word,freq),yend = reorder(word,freq),x=0,xend =  freq),color = "black")+
+  theme(
+  panel.grid.major.x = element_blank(),
+  panel.border = element_blank(),
+  axis.ticks.x = element_blank()
+)+theme_light()+ylab("Word")+xlab("Count")+ggtitle("Fifth Third Bank")+labs(subtitle   = "Visbanking")
+
+```
+
+
+
+
+```{r,warning=FALSE,message=FALSE}
+df_d = df[1:35,]
+p = ggplot(df_d, aes(x = as.factor(word),y = freq)) +
+  geom_point(color = 'red') +
+  theme_classic(base_size = 10)
+p+geom_label_repel(aes(label = rownames(df_d),
+                         fill = factor(word)), color = 'black',
+                     size = 3.5) +
+  theme(legend.position = ,
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+labs(subtitle = "Visbanking")+guides(fill=FALSE)
+```
+
+
+
+
+
+
+
+The most frequent words in the title variable can be seen as fifth, third, buys, financial, etf and management. Judging by those other than fifth and third, the news is mainly on purchases and etf confirmations.
+
+
+
+
+## Summary Contents
+
+
+I detect duplacate variable but these are NA.
+```{r,warning=FALSE,message=FALSE}
+sum(duplicated(news$summary_content))
+news$summary_content = rm_url(news$summary_content, pattern=pastex("@rm_url"))
+news$summary_content = gsub("<.*?>", "", news$summary_content)
+news$summary_content = gsub("href", "", news$summary_content)
+cp = VCorpus(VectorSource(news$summary_content))
+docs = cp %>%
+  tm_map(removeNumbers) %>%
+  tm_map(stripWhitespace)%>%
+  tm_map(removePunctuation)
+docs = tm_map(docs, content_transformer(tolower))
+docs = tm_map(docs, removeWords, stopwords("english"))
+
+dtm = TermDocumentMatrix(docs) 
+matrix = as.matrix(dtm) 
+words = sort(rowSums(matrix),decreasing=TRUE) 
+df = data.frame(word = names(words),freq=words)
+df = df[-which(str_length(df$word)>20),]
+#View(df)
+pal = brewer.pal(9,"BuGn")
+pal[10:15] = c("#ad3306","#086de0","#890549","#e00808","#eddd09")
+wordcloud(words = df$word,freq = df$freq,colors = pal, rot.per=0.2,random.color = T,vfont=c("serif","plain"))
+
+```
+
+```{r,warning=FALSE,message=FALSE}
+
+plot = ggplot(df[order(-df$freq)[1:20],],aes(y = reorder(word,freq),x = freq))+geom_bar(stat = "identity",fill=alpha("blue", 0.3))
+plot+
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.x = element_blank(),
+    plot.margin = unit(rep(-2,4), "cm")
+  )+theme_light()+ylab("Word")+xlab("Count")+ggtitle("Fifth Third Bank")
+```
+
+```{r,warning=FALSE,message=FALSE}
+plot = ggplot(df[order(-df$freq[1:20]),],aes(reorder(word,freq), freq))+geom_segment(aes(x =reorder(word,freq),xend = reorder(word,freq),y=0,yend =  freq),color = "black")
+plot+geom_point(size = 4,color ="orange",fill = alpha("orange",.5),alpha = .5,shape = 21,stroke = 2)+theme_minimal()+theme(
+  panel.grid.major.x = element_blank(),
+  panel.border = element_blank(),
+  axis.ticks.x = element_blank()
+)+coord_flip()+theme_grey()+ylab("Count")+xlab("Words")+ggtitle("Fifth Third Bank",subtitle = "Summary Content")
+
+```
+
+
+
+
+
+
+When we look at the most repeated words in the summary_sentence variable, the words bank, stocks, related, percent and business are included.These may also be related to stock purchases to support the findings in the title variable.
+
+
+# Full Content
+
+
+Some functions
+```{r,warning=FALSE,message=FALSE}
+cleanCorpus = function(corpus)
+{
+  
+  corpus.tmp = tm_map(corpus, removePunctuation)
+  corpus.tmp = tm_map(corpus.tmp, stripWhitespace)
+  corpus.tmp = tm_map(corpus.tmp, content_transformer(tolower))
+  v_stopwords = c(stopwords("english"), c("thats","weve","hes","theres","ive","im",
+                                           "will","can","cant","dont","youve","us",
+                                           "youre","youll","theyre","whats","didnt"))
+  corpus.tmp = tm_map(corpus.tmp, removeWords, v_stopwords)
+  corpus.tmp = tm_map(corpus.tmp, removeNumbers)
+  return(corpus.tmp)
+}
+frequentBigrams = function(text){
+  
+  s.cor = VCorpus(VectorSource(text))
+  s.cor.cl = cleanCorpus(s.cor)
+  s.tdm = TermDocumentMatrix(s.cor.cl, control=list(tokenize=tokenizer))
+  s.tdm = removeSparseTerms(s.tdm, 0.999)
+  m = as.matrix(s.tdm)
+  word_freqs = sort(rowSums(m), decreasing=TRUE)
+  dm = data.frame(word=names(word_freqs), freq=word_freqs)
+  dm = dm[-which(str_length(dm$word)>20),]
+  
+  return(dm)
+  
+}
+
+frequentTerms = function(text){
+  
+  s.cor = Corpus(VectorSource(text))
+  s.cor.cl = cleanCorpus(s.cor)
+  s.tdm = TermDocumentMatrix(s.cor.cl)
+  s.tdm = removeSparseTerms(s.tdm, 0.999)
+  m = as.matrix(s.tdm)
+  word_freqs = sort(rowSums(m), decreasing=TRUE)
+  dm = data.frame(word=names(word_freqs), freq=word_freqs)
+  dm = dm[-which(str_length(dm$word)>20),]
+  return(dm)
+  
+}
+
+tokenizer  = function(x){
+  
+  NGramTokenizer(x, Weka_control(min=2, max=2))
+  
+}
+news$fullcontent = rm_url(news$fullcontent, pattern=pastex("@rm_url"))
+news$fullcontent = gsub("<.*?>", "", news$fullcontent)
+news$fullcontent = gsub("href", "", news$fullcontent)
+
+pal = brewer.pal(9,"Blues")
+pal[10:15] = c("#ad3306","#086de0","#890549","#e00808","#eddd09")
+df = frequentTerms(news$fullcontent)
+wordcloud(words = df$word,freq = df$freq,colors = pal, rot.per=0.2,random.color = T,vfont=c("serif","plain"),max.words = 200)
+```
+```{r,warning=FALSE,message=FALSE}
+df = frequentTerms(news$fullcontent)
+plot = ggplot(df[order(-df$freq)[1:20],],aes(y = reorder(word,freq),x = freq))+geom_bar(stat = "identity",fill=alpha("#800000"))
+plot+
+  theme(
+    panel.grid.major.x = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.x = element_blank(),
+    plot.margin = unit(rep(-2,4), "cm")
+  )+theme_light()+ylab("Word")+xlab("Count")+ggtitle("Fifth Third Bank")
+
+```
+
+Let's consider two different sources in this section. Those are *YahooFinance* and *GuruFocus New Articles*.
+
+```{r,warning=FALSE,message=FALSE}
+origintitle = news%>%select(origin_title,fullcontent)%>%as.data.frame()
+gurufocus = origintitle%>%filter(origin_title == "GuruFocus New Articles")
+yahoo = origintitle%>%filter(origin_title == "Yahoo Finance")
+gurufocus_str = gurufocus$fullcontent%>%lapply(paste0)
+yahoo_str = yahoo$fullcontent%>%lapply(paste0)
+yahoo_str = rm_url(yahoo_str, pattern=pastex("@rm_url"))
+yahoo_str = gsub("<.*?>", "", yahoo_str)
+yahoo_str = gsub("href", "", yahoo_str)
+yahoo_bigrams = frequentBigrams(yahoo_str)
+gurufocus_str = rm_url(gurufocus_str, pattern=pastex("@rm_url"))
+gurufocus_str = gsub("<.*?>", "", gurufocus_str)
+gurufocus_str = gsub("href", "", gurufocus_str)
+gurufocus_bigrams = frequentBigrams(gurufocus_str)
+yahoobigrams <- frequentBigrams(yahoo_str)[1:15,]
+gurubigrams <- frequentBigrams(gurufocus_str)[1:15,]
+
+p1 = ggplot(data=yahoobigrams, aes(x=reorder(word, -freq), y=freq)) +  
+  geom_bar(stat="identity", fill="skyblue", colour="black") +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  labs(x="", y="Frequency")+labs(subtitle = "Yahoo Finace")+coord_flip()
+
+p2 = ggplot(data=gurubigrams, aes(x=reorder(word, -freq), y=freq)) +  
+  geom_bar(stat="identity", fill="skyblue", colour="black") +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) +
+  labs(x="Bigrams", y="Frequency")+labs(subtitle = "GuruFocus New Articles ")+coord_flip()
+grid.arrange(arrangeGrob(p1,p2,ncol = 2))
+```
+
+
+
+
+
+
+When we look at the frequently used bigram words, there are financial stocks, older workers and fifth third words in Yahoo Finance.Yahoo Finance writers seem to be more interested in the bank's internal relations.
+
+And when we look at GuruFocus, price estimated, estimated average and average price are the most used bigram words. We can say that GuruFocus writers are more interested in the stock price of the company than in internal relations.
+
+
+
+# Sentiment Analysis
+
+```{r,warning=FALSE,message=FALSE}
+library(wordcloud)
+library(reshape2)
+news$fullcontent = rm_url(news$fullcontent, pattern=pastex("@rm_url"))
+news$fullcontent = gsub("<.*?>", "", news$fullcontent)
+news$fullcontent = gsub("href", "", news$fullcontent)
+news$fullcontent = rm_number(news$fullcontent)
+news$fullcontent = str_remove_all(news$fullcontent,"[[:punct:]]")
+fullcontent = news%>%select(fullcontent)
+
+tokens = fullcontent%>%unnest_tokens(output = "word",input = fullcontent,token = "words")
+sentiment = tokens %>%
+  inner_join(get_sentiments("bing"))%>%
+count(word, sentiment, sort=TRUE) %>%
+  acast(word ~ sentiment, value.var="n", fill=0) %>%
+  comparison.cloud(colors=c("#ff0a0a", "#18ef09"), max.words=100)
+
+```
+
+```{r,warning=FALSE,message=FALSE}
+sentiment = tokens %>%
+  inner_join(get_sentiments("bing"))%>%
+count(word, sentiment, sort=TRUE)
+sentiment %>%
+  group_by(sentiment) %>%
+  arrange(desc(n)) %>%
+  slice(1:20) %>%
+  ggplot(aes(x=reorder(word, n), y=n)) +
+  geom_col(aes(fill=sentiment), show.legend=T) +facet_wrap(~sentiment, scales="free_y") +labs(y="Frequency", x="Terms") +theme_classic()+coord_flip() 
+```
+
+
+
+
+
+The words that were negative according to the results of the sentiment analysis were determined as risk, problem, oversight, difficult, stress. Judging by the negative words, its employees may be under heavy workload and the company may be interpreted as experiencing certain financial difficulties.
+
+
+
+
+```{r,warning=FALSE,message=FALSE}
+sentiment %>%
+  group_by(sentiment) %>%
+  arrange(desc(n)) %>%
+  slice(1:20) %>%
+  ggplot(aes(x=reorder(word, n), y=n)) +
+  geom_bar(stat = "identity",aes(fill=sentiment), show.legend=T)+labs(y="Frequency", x="Terms") +theme_classic()+coord_flip()+ggtitle("Popular Sentiment Assigned Word")
+```
+
+
+
+
+
+
+The words that were negative according to the results of the sentiment analysis were determined as risk, problem, oversight, difficult, stress. Judging by the negative words, its employees may be under heavy workload and the company may be interpreted as experiencing certain financial difficulties.
+
+
+
+# Sentiment Analysis - YahooFinance vs GuruFocus
+In this section, let's compare the sentiment analysis on Yahoo Finance and GuruFocus New Articles.
+```{r,warning=FALSE,message=FALSE}
+yahoo = rm_url(yahoo, pattern=pastex("@rm_url"))
+yahoo = gsub("<.*?>", "", yahoo)
+yahoo = gsub("href", "", yahoo)
+yahoo = rm_number(yahoo)
+yahoo = str_remove_all(yahoo,"[[:punct:]]")
+yahoo = tolower(yahoo)
+yahoo = as.data.frame(yahoo)
+tokens_yahoo = yahoo%>%unnest_tokens(output = "word",input = yahoo,token = "words")
+sentiment_yahoo = tokens_yahoo %>%
+  inner_join(get_sentiments("bing"))%>%
+count(word, sentiment, sort=TRUE)
+p = sentiment_yahoo %>%
+  group_by(sentiment) %>%
+  arrange(desc(n)) %>%
+  slice(1:5) %>%
+  ggplot(aes(x=reorder(word, n), y=n)) +
+  geom_bar(stat = "identity",aes(fill=sentiment), show.legend=T)+labs(y="Frequency", x="Terms") +theme_classic()+coord_flip()+ggtitle("Yahoo Finance")
+
+#########
+# GuruFocus
+gurufocus = rm_url(gurufocus, pattern=pastex("@rm_url"))
+gurufocus = gsub("<.*?>", "", gurufocus)
+gurufocus = gsub("href", "", gurufocus)
+gurufocus = rm_number(gurufocus)
+gurufocus = str_remove_all(gurufocus,"[[:punct:]]")
+gurufocus = tolower(gurufocus)
+gurufocus = as.data.frame(gurufocus)
+tokens_guru = gurufocus%>%unnest_tokens(output = "word",input = gurufocus,token = "words")
+sentiment_guru = tokens_guru %>%
+  inner_join(get_sentiments("bing"))%>%
+count(word, sentiment, sort=TRUE)
+p1 = sentiment_guru %>%
+  group_by(sentiment) %>%
+  arrange(desc(n)) %>%
+  slice(1:5) %>%
+  ggplot(aes(x=reorder(word, n), y=n)) +
+  geom_bar(stat = "identity",aes(fill=sentiment), show.legend=T)+labs(y="Frequency", x="Terms") +theme_classic()+coord_flip()+ggtitle("GuruFocus")
+guru_pn = sentiment_guru%>%group_by(sentiment)%>%summarise(n = sum(n))
+yahoo_pn = sentiment_yahoo%>%group_by(sentiment)%>%summarise(n = sum(n))
+pie = ggplot(guru_pn,aes(x = "",y = n,fill = sentiment))+geom_bar(stat = "identity")+coord_polar("y",start = 0)+theme_void()
+pie1 = ggplot(yahoo_pn,aes(x = "",y = n,fill = sentiment))+geom_bar(stat = "identity")+coord_polar("y",start = 0)+theme_void()
+grid.arrange(arrangeGrob(p,p1,pie1,pie,ncol = 2))
+
+```
+
+
+
+
+Looking at the results, YahooFinance uses more negative words in its articles. In general, negative words were used on risks, unemployment, worries.
+In GuruFocus, on the other hand, less negative words are used compared to Yahoo Finance. These are about stress and worries.
+
+
+
+
+
+
+## WordCloud by GuruFocus
+
+```{r,warning=FALSE,message=FALSE}
+a1 = tokens_guru %>%
+  inner_join(get_sentiments("bing"))%>%
+count(word, sentiment, sort=TRUE) %>%
+  acast(word ~ sentiment, value.var="n", fill=0) %>%
+  comparison.cloud(colors=c("#ff0a0a", "#18ef09"), max.words=100)
+```
+
+
+
+
+
+
+
+## WordCloud by Yahoo Finance
+```{r,warning=FALSE,message=FALSE}
+a = tokens_yahoo %>%
+  inner_join(get_sentiments("bing"))%>%
+count(word, sentiment, sort=TRUE) %>%
+  acast(word ~ sentiment, value.var="n", fill=0) %>%
+  comparison.cloud(colors=c("#ff0a0a", "#18ef09"), max.words=100)
+```
+
